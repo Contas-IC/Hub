@@ -163,6 +163,98 @@ exports.atualizarPermissoes = async (req, res) => {
   }
 };
 
+// Atualizar usuário completo (apenas admin)
+exports.atualizarUsuario = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { nome, email, senha, cargo, permissoes } = req.body;
+    const usuarioCargo = req.usuarioCargo;
+
+    if (usuarioCargo !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Acesso negado. Apenas administradores podem atualizar usuários.'
+      });
+    }
+
+    // Verificar se usuário existe
+    const usuarioExistente = query('SELECT id FROM usuarios WHERE id = ?', [id])[0];
+    if (!usuarioExistente) {
+      return res.status(404).json({
+        success: false,
+        message: 'Usuário não encontrado'
+      });
+    }
+
+    // Validações
+    if (!nome || !email) {
+      return res.status(400).json({
+        success: false,
+        message: 'Nome e email são obrigatórios'
+      });
+    }
+
+    // Verificar se email já existe em outro usuário
+    const emailExiste = query('SELECT id FROM usuarios WHERE email = ? AND id != ?', [email, id])[0];
+    if (emailExiste) {
+      return res.status(400).json({
+        success: false,
+        message: 'Este email já está em uso por outro usuário'
+      });
+    }
+
+    // Preparar dados para atualização
+    let updateFields = 'nome = ?, email = ?, cargo = ?';
+    let updateValues = [nome, email, cargo || 'usuario'];
+
+    // Se senha foi fornecida, incluir na atualização
+    if (senha && senha.trim() !== '') {
+      if (senha.length < 6) {
+        return res.status(400).json({
+          success: false,
+          message: 'A senha deve ter no mínimo 6 caracteres'
+        });
+      }
+      const senhaHash = await bcrypt.hash(senha, 10);
+      updateFields += ', senha = ?';
+      updateValues.push(senhaHash);
+    }
+
+    updateValues.push(id);
+
+    // Atualizar usuário
+    run(`UPDATE usuarios SET ${updateFields} WHERE id = ?`, updateValues);
+
+    // Atualizar permissões se fornecidas
+    if (permissoes !== undefined) {
+      // Deletar permissões antigas
+      run('DELETE FROM permissoes_usuarios WHERE usuario_id = ?', [id]);
+
+      // Adicionar novas permissões
+      if (Array.isArray(permissoes)) {
+        permissoes.forEach(perm => {
+          run(
+            'INSERT INTO permissoes_usuarios (usuario_id, modulo, pode_editar) VALUES (?, ?, ?)',
+            [id, perm.modulo, perm.pode_editar ? 1 : 0]
+          );
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      message: 'Usuário atualizado com sucesso!'
+    });
+  } catch (error) {
+    console.error('Erro ao atualizar usuário:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao atualizar usuário',
+      error: error.message
+    });
+  }
+};
+
 // Desativar/Ativar usuário (apenas admin)
 exports.toggleUsuario = async (req, res) => {
   try {
@@ -177,7 +269,7 @@ exports.toggleUsuario = async (req, res) => {
     }
 
     const usuario = query('SELECT ativo FROM usuarios WHERE id = ?', [id])[0];
-    
+
     if (!usuario) {
       return res.status(404).json({
         success: false,

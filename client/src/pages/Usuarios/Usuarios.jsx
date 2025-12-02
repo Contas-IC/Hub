@@ -240,6 +240,22 @@ export default function Usuarios() {
           }}
         />
       )}
+
+      {/* Modal Editar Usuário */}
+      {modalEditarAberto && usuarioEditando && (
+        <ModalEditarUsuario
+          usuario={usuarioEditando}
+          onClose={() => {
+            setModalEditarAberto(false);
+            setUsuarioEditando(null);
+          }}
+          onSuccess={() => {
+            setModalEditarAberto(false);
+            setUsuarioEditando(null);
+            carregarUsuarios();
+          }}
+        />
+      )}
     </div>
   );
 }

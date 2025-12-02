@@ -18,7 +18,7 @@ export default function Sidebar({ aberta }) {
       path: '/dashboard',
       icon: LayoutDashboard,
       label: 'Dashboard',
-      modulo: 'ADMIN'
+      // Sem módulo - visível para todos
     },
     {
       path: '/usuarios',
@@ -58,9 +58,14 @@ export default function Sidebar({ aberta }) {
     }
   ];
 
-  const itensVisiveis = menuItems.filter(item =>
-    permissoes.includes(item.modulo) || permissoes.includes('ADMIN')
-  );
+  // ✅ CORREÇÃO: Permitir itens sem módulo
+  const itensVisiveis = menuItems.filter(item => {
+    // Se não tem módulo, mostrar para todos
+    if (!item.modulo) return true;
+    
+    // Se tem módulo, verificar permissão
+    return permissoes.includes(item.modulo) || permissoes.includes('ADMIN');
+  });
 
   const isActive = (path) => location.pathname === path;
 

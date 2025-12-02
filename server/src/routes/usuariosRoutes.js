@@ -13,6 +13,9 @@ router.get('/', usuariosController.listarUsuarios);
 // POST /api/usuarios - Criar novo usuário (apenas admin)
 router.post('/', usuariosController.criarUsuario);
 
+// PUT /api/usuarios/:id - Atualizar usuário completo (apenas admin)
+router.put('/:id', usuariosController.atualizarUsuario);
+
 // PUT /api/usuarios/:id/permissoes - Atualizar permissões (apenas admin)
 router.put('/:id/permissoes', usuariosController.atualizarPermissoes);
 

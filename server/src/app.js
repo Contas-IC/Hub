@@ -30,10 +30,14 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 const authRoutes = require('./routes/authRoutes');
 const configRoutes = require('./routes/configRoutes');
 const usuariosRoutes = require('./routes/usuariosRoutes');
+const certificadosRoutes = require('./routes/certificadosRoutes');
+const clientesRoutes = require('./routes/clientesRoutes');
 
 app.use('/api/auth', authRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/usuarios', usuariosRoutes);
+app.use('/api/certificados', certificadosRoutes);
+app.use('/api/clientes', clientesRoutes);
 
 // Rota de teste
 app.get('/api/health', (req, res) => {
