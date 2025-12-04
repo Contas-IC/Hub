@@ -1,26 +1,22 @@
 // arquivo: server/src/middlewares/auth.js
-const jwt = require('jsonwebtoken');
 
-function authMiddleware(req, res, next) {
+const jwt = require('jsonwebtoken');
+const { get } = require('../config/database');
+
+module.exports = (req, res, next) => {
   try {
-    // Pegar token do header
+    // Obter token do header Authorization
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader) {
-      return res.status(401).json({
-        success: false,
-        message: 'Token não fornecido'
-      });
+      return res.status(401).json({ message: 'Token não fornecido' });
     }
 
     // Formato: "Bearer TOKEN"
     const parts = authHeader.split(' ');
-    
+
     if (parts.length !== 2 || parts[0] !== 'Bearer') {
-      return res.status(401).json({
-        success: false,
-        message: 'Formato de token inválido'
-      });
+      return res.status(401).json({ message: 'Formato de token inválido' });
     }
 
     const token = parts[1];
@@ -28,27 +24,29 @@ function authMiddleware(req, res, next) {
     // Verificar token
     jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
       if (err) {
-        return res.status(401).json({
-          success: false,
-          message: 'Token inválido ou expirado'
-        });
+        return res.status(401).json({ message: 'Token inválido ou expirado' });
       }
 
-      // Adicionar dados do usuário na request
-      req.usuarioId = decoded.id;
-      req.usuarioEmail = decoded.email;
-      req.usuarioCargo = decoded.cargo;
-      req.usuarioNome = decoded.nome;
-      
-      return next();
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: 'Erro ao validar token',
-      error: error.message
-    });
-  }
-}
+      // Buscar usuário no banco
+      const usuario = get('SELECT * FROM usuarios WHERE id = ? AND ativo = 1', [decoded.id]);
 
-module.exports = authMiddleware;
+      if (!usuario) {
+        return res.status(401).json({ message: 'Usuário não encontrado ou inativo' });
+      }
+
+      // Adicionar usuário ao request
+      req.usuario = {
+        id: usuario.id,
+        nome: usuario.nome,
+        email: usuario.email,
+        cargo: usuario.cargo
+      };
+
+      next();
+    });
+
+  } catch (error) {
+    console.error('Erro no middleware de autenticação:', error);
+    return res.status(500).json({ message: 'Erro na autenticação' });
+  }
+};

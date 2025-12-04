@@ -1,5 +1,5 @@
-    const Tarefa = require('../models/Tarefa');
-const Auditoria = require('../models/Auditoria');
+    const Tarefa = require('../../models/Tarefa');
+const Auditoria = require('../../models/Auditoria');
 
 const registrarAuditoria = async (usuario, acao, modulo, entidade, detalhes, ip) => {
   try {

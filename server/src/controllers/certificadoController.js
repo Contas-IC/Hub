@@ -1,241 +1,118 @@
-// server/src/controllers/certificadoController.js
+// arquivo: server/src/controllers/certificadoController.js
 
 const { query, get, run } = require('../config/database');
 
-// Listar todos os certificados
-const listarCertificados = async (req, res) => {
+// Função auxiliar para registrar auditoria
+const registrarAuditoria = (usuarioId, acao, modulo, entidade, detalhes, ip) => {
   try {
-    const { status, vencimento, clienteId } = req.query;
-    
+    run(`
+      INSERT INTO auditoria (usuario_id, acao, modulo, entidade, detalhes, ip)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [usuarioId, acao, modulo, entidade, detalhes, ip]);
+  } catch (error) {
+    console.error('Erro ao registrar auditoria:', error);
+  }
+};
+
+// ========================================
+// LISTAR CERTIFICADOS
+// ========================================
+exports.listarCertificados = async (req, res) => {
+  try {
+    const { busca, status, vencimento } = req.query;
+
     let sql = `
       SELECT 
-        c.id,
-        c.cliente_id,
-        c.tipo_certificado,
-        c.numero_serie,
-        c.data_emissao,
-        c.data_vencimento,
-        c.status,
-        c.arquivo_path,
-        c.observacoes,
-        c.criado_em,
-        c.atualizado_em,
-        cl.codigo as cliente_codigo,
-        COALESCE(cl.nome_empresa, c.nome_cliente) as cliente_nome,
-        cl.cnpj as cliente_cnpj
-      FROM certificados c
-      LEFT JOIN clientes cl ON c.cliente_id = cl.id
+        cert.*,
+        c.codigo as cliente_codigo,
+        c.nome_empresa as cliente_nome,
+        c.cnpj as cliente_cnpj
+      FROM certificados cert
+      LEFT JOIN clientes c ON cert.cliente_id = c.id
       WHERE 1=1
     `;
-    
+
     const params = [];
 
-    // Filtro por status
+    if (busca) {
+      sql += ' AND (c.nome_empresa LIKE ? OR cert.nome_cliente LIKE ? OR cert.numero_serie LIKE ?)';
+      const buscaParam = `%${busca}%`;
+      params.push(buscaParam, buscaParam, buscaParam);
+    }
+
     if (status) {
-      sql += ' AND c.status = ?';
+      sql += ' AND cert.status = ?';
       params.push(status);
     }
 
-    // Filtro por cliente
-    if (clienteId) {
-      sql += ' AND c.cliente_id = ?';
-      params.push(clienteId);
-    }
-
-    // Filtro por vencimento
+    // Filtro de vencimento
     if (vencimento === 'vencidos') {
-      sql += ' AND c.data_vencimento < DATE("now")';
-    } else if (vencimento === 'proximo_vencer') {
-      sql += ' AND c.data_vencimento BETWEEN DATE("now") AND DATE("now", "+30 days")';
+      sql += " AND date(cert.data_vencimento) < date('now')";
+    } else if (vencimento === 'proximos') {
+      sql += " AND date(cert.data_vencimento) BETWEEN date('now') AND date('now', '+30 days')";
     }
 
-    sql += ' ORDER BY c.data_vencimento ASC';
+    sql += ' ORDER BY cert.data_vencimento ASC';
 
     const certificados = query(sql, params);
 
-    res.json({
-      sucesso: true,
-      dados: certificados,
-      total: certificados.length
-    });
+    res.json(certificados);
 
   } catch (error) {
     console.error('Erro ao listar certificados:', error);
-    res.status(500).json({
-      sucesso: false,
-      mensagem: 'Erro ao listar certificados',
-      erro: error.message
-    });
+    res.status(500).json({ message: 'Erro ao listar certificados', error: error.message });
   }
 };
 
-// Buscar certificado por cliente
-const buscarCertificadoPorCliente = async (req, res) => {
+// ========================================
+// BUSCAR CERTIFICADOS POR CLIENTE
+// ========================================
+exports.buscarCertificadoPorCliente = async (req, res) => {
   try {
     const { clienteId } = req.params;
 
-    const sql = `
-      SELECT 
-        c.id,
-        c.cliente_id,
-        c.tipo_certificado,
-        c.numero_serie,
-        c.data_emissao,
-        c.data_vencimento,
-        c.status,
-        c.arquivo_path,
-        c.observacoes,
-        c.criado_em,
-        c.atualizado_em,
-        cl.codigo as cliente_codigo,
-        COALESCE(cl.nome_empresa, c.nome_cliente) as cliente_nome,
-        cl.cnpj as cliente_cnpj
-      FROM certificados c
-      LEFT JOIN clientes cl ON c.cliente_id = cl.id
-      WHERE c.cliente_id = ?
-      ORDER BY c.data_vencimento DESC
-    `;
-    const certificados = query(sql, [clienteId]);
+    const certificados = query(`
+      SELECT * FROM certificados
+      WHERE cliente_id = ?
+      ORDER BY data_vencimento DESC
+    `, [clienteId]);
 
-    if (!certificados || certificados.length === 0) {
-      return res.status(404).json({
-        sucesso: false,
-        mensagem: 'Nenhum certificado encontrado para este cliente'
-      });
-    }
-
-    res.json({
-      sucesso: true,
-      dados: certificados
-    });
+    res.json(certificados);
 
   } catch (error) {
-    console.error('Erro ao buscar certificados do cliente:', error);
-    res.status(500).json({
-      sucesso: false,
-      mensagem: 'Erro ao buscar certificados do cliente',
-      erro: error.message
-    });
+    console.error('Erro ao buscar certificados:', error);
+    res.status(500).json({ message: 'Erro ao buscar certificados', error: error.message });
   }
 };
 
-// Atualizar certificado
-const atualizarCertificado = async (req, res) => {
+// ========================================
+// BUSCAR CERTIFICADO POR ID
+// ========================================
+exports.buscarCertificadoPorId = async (req, res) => {
   try {
-    const { clienteId } = req.params;
-    const {
-      tipo_certificado,
-      numero_serie,
-      data_emissao,
-      data_vencimento,
-      status,
-      arquivo_path,
-      observacoes
-    } = req.body;
+    const { id } = req.params;
 
-    // Validações
-    if (!tipo_certificado || !data_vencimento) {
-      return res.status(400).json({
-        sucesso: false,
-        mensagem: 'Tipo de certificado e data de vencimento são obrigatórios'
-      });
+    const certificado = get('SELECT * FROM certificados WHERE id = ?', [id]);
+
+    if (!certificado) {
+      return res.status(404).json({ message: 'Certificado não encontrado' });
     }
 
-    // Verificar se já existe certificado para este cliente
-    const certificadoExistente = get('SELECT id FROM certificados WHERE cliente_id = ?', [clienteId]);
-
-    let resultado;
-
-    if (certificadoExistente) {
-      // Atualizar certificado existente
-      resultado = run(
-        `
-        UPDATE certificados SET
-          tipo_certificado = ?,
-          numero_serie = ?,
-          data_emissao = ?,
-          data_vencimento = ?,
-          status = ?,
-          arquivo_path = ?,
-          observacoes = ?,
-          atualizado_em = CURRENT_TIMESTAMP
-        WHERE cliente_id = ?
-        `,
-        [
-          tipo_certificado,
-          numero_serie || null,
-          data_emissao || null,
-          data_vencimento,
-          status || 'ativo',
-          arquivo_path || null,
-          observacoes || null,
-          clienteId
-        ]
-      );
-
-    } else {
-      // Criar novo certificado
-      resultado = run(
-        `
-        INSERT INTO certificados (
-          cliente_id,
-          tipo_certificado,
-          numero_serie,
-          data_emissao,
-          data_vencimento,
-          status,
-          arquivo_path,
-          observacoes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-        [
-          clienteId,
-          tipo_certificado,
-          numero_serie || null,
-          data_emissao || null,
-          data_vencimento,
-          status || 'ativo',
-          arquivo_path || null,
-          observacoes || null
-        ]
-      );
-    }
-
-    // Buscar certificado atualizado
-    const certificadoAtualizado = get(
-      `
-      SELECT 
-        c.*,
-        cl.codigo as cliente_codigo,
-        COALESCE(cl.nome_empresa, c.nome_cliente) as cliente_nome,
-        cl.cnpj as cliente_cnpj
-      FROM certificados c
-      LEFT JOIN clientes cl ON c.cliente_id = cl.id
-      WHERE c.cliente_id = ?
-      `,
-      [clienteId]
-    );
-
-    res.json({
-      sucesso: true,
-      mensagem: certificadoExistente ? 'Certificado atualizado com sucesso' : 'Certificado criado com sucesso',
-      dados: certificadoAtualizado
-    });
+    res.json(certificado);
 
   } catch (error) {
-    console.error('Erro ao atualizar certificado:', error);
-    res.status(500).json({
-      sucesso: false,
-      mensagem: 'Erro ao atualizar certificado',
-      erro: error.message
-    });
+    console.error('Erro ao buscar certificado:', error);
+    res.status(500).json({ message: 'Erro ao buscar certificado', error: error.message });
   }
 };
 
-// Criar certificado avulso (sem cliente cadastrado)
-const criarCertificadoAvulso = async (req, res) => {
+// ========================================
+// CRIAR CERTIFICADO
+// ========================================
+exports.criarCertificado = async (req, res) => {
   try {
     const {
+      cliente_id,
       nome_cliente,
       tipo_certificado,
       numero_serie,
@@ -246,153 +123,172 @@ const criarCertificadoAvulso = async (req, res) => {
       observacoes
     } = req.body;
 
-    if (!nome_cliente || !tipo_certificado || !data_vencimento) {
-      return res.status(400).json({
-        sucesso: false,
-        mensagem: 'Nome do cliente, tipo e vencimento são obrigatórios'
-      });
-    }
-
-    // Garantir que a coluna nome_cliente exista (migração leve)
-    try {
-      const cols = query('PRAGMA table_info(certificados)');
-      const temNomeCliente = Array.isArray(cols) && cols.some(c => c.name === 'nome_cliente');
-      if (!temNomeCliente) {
-        run('ALTER TABLE certificados ADD COLUMN nome_cliente TEXT');
-      }
-    } catch (e) {
-      // Ignorar caso não consiga verificar/alterar; tentativa de inserir pode falhar e será reportada
-      console.warn('Aviso: não foi possível garantir coluna nome_cliente:', e.message);
-    }
-
-    const resultado = run(
-      `
+    const result = run(`
       INSERT INTO certificados (
-        cliente_id,
-        nome_cliente,
-        tipo_certificado,
-        numero_serie,
-        data_emissao,
-        data_vencimento,
-        status,
-        arquivo_path,
-        observacoes
+        cliente_id, nome_cliente, tipo_certificado, numero_serie,
+        data_emissao, data_vencimento, status, arquivo_path, observacoes
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      [
-        null,
-        nome_cliente,
-        tipo_certificado,
-        numero_serie || null,
-        data_emissao || null,
-        data_vencimento,
-        status || 'ativo',
-        arquivo_path || null,
-        observacoes || null
-      ]
+    `, [
+      cliente_id,
+      nome_cliente,
+      tipo_certificado,
+      numero_serie,
+      data_emissao,
+      data_vencimento,
+      status || 'ATIVO',
+      arquivo_path,
+      observacoes
+    ]);
+
+    // Buscar certificado criado
+    const novoCertificado = get('SELECT * FROM certificados WHERE id = ?', [result.lastInsertRowid]);
+
+    // Registrar auditoria
+    registrarAuditoria(
+      req.usuario?.id || 1,
+      'CRIAR',
+      'CERTIFICADOS',
+      nome_cliente,
+      `Criou certificado ${tipo_certificado} para ${nome_cliente}`,
+      req.ip
     );
 
-    const novo = get(
-      `
-      SELECT 
-        c.id, c.cliente_id, c.nome_cliente, c.tipo_certificado, c.numero_serie,
-        c.data_emissao, c.data_vencimento, c.status, c.arquivo_path, c.observacoes,
-        c.criado_em, c.atualizado_em
-      FROM certificados c
-      WHERE c.id = ?
-      `,
-      [resultado.lastInsertRowid || resultado.lastID]
-    );
-
-    res.json({
-      sucesso: true,
-      mensagem: 'Certificado avulso criado com sucesso',
-      dados: novo
-    });
+    res.status(201).json(novoCertificado);
 
   } catch (error) {
-    console.error('Erro ao criar certificado avulso:', error);
-    res.status(500).json({
-      sucesso: false,
-      mensagem: 'Erro ao criar certificado avulso',
-      erro: error.message
-    });
+    console.error('Erro ao criar certificado:', error);
+    res.status(500).json({ message: 'Erro ao criar certificado', error: error.message });
   }
 };
 
-// Estatísticas de certificados
-const estatisticasCertificados = async (req, res) => {
+// ========================================
+// ATUALIZAR CERTIFICADO
+// ========================================
+exports.atualizarCertificado = async (req, res) => {
   try {
-    // Total de certificados
-    const { total } = get('SELECT COUNT(*) as total FROM certificados');
+    const { id } = req.params;
+    const {
+      cliente_id,
+      nome_cliente,
+      tipo_certificado,
+      numero_serie,
+      data_emissao,
+      data_vencimento,
+      status,
+      arquivo_path,
+      observacoes
+    } = req.body;
 
-    // Certificados ativos
-    const { total: ativos } = get('SELECT COUNT(*) as total FROM certificados WHERE status = "ativo"');
+    // Verificar se existe
+    const existe = get('SELECT * FROM certificados WHERE id = ?', [id]);
+    if (!existe) {
+      return res.status(404).json({ message: 'Certificado não encontrado' });
+    }
 
-    // Certificados vencidos
-    const { total: vencidos } = get('SELECT COUNT(*) as total FROM certificados WHERE data_vencimento < DATE("now")');
+    run(`
+      UPDATE certificados SET
+        cliente_id = ?,
+        nome_cliente = ?,
+        tipo_certificado = ?,
+        numero_serie = ?,
+        data_emissao = ?,
+        data_vencimento = ?,
+        status = ?,
+        arquivo_path = ?,
+        observacoes = ?,
+        atualizado_em = datetime('now','localtime')
+      WHERE id = ?
+    `, [
+      cliente_id,
+      nome_cliente,
+      tipo_certificado,
+      numero_serie,
+      data_emissao,
+      data_vencimento,
+      status,
+      arquivo_path,
+      observacoes,
+      id
+    ]);
 
-    // Certificados próximos a vencer (30 dias)
-    const { total: proximoVencer } = get(
-      `
-      SELECT COUNT(*) as total 
-      FROM certificados 
-      WHERE data_vencimento BETWEEN DATE("now") AND DATE("now", "+30 days")
-      `
+    const certificadoAtualizado = get('SELECT * FROM certificados WHERE id = ?', [id]);
+
+    // Registrar auditoria
+    registrarAuditoria(
+      req.usuario?.id || 1,
+      'EDITAR',
+      'CERTIFICADOS',
+      nome_cliente,
+      `Atualizou certificado ${tipo_certificado}`,
+      req.ip
     );
 
-    // Certificados por tipo
-    const porTipo = query(
-      `
-      SELECT tipo_certificado, COUNT(*) as quantidade
-      FROM certificados
-      GROUP BY tipo_certificado
-      `
-    );
-
-    // Certificados vencendo nos próximos dias (lista)
-    const vencendoEmBreve = query(
-      `
-      SELECT 
-        c.id,
-        c.tipo_certificado,
-        c.data_vencimento,
-        COALESCE(cl.nome_empresa, c.nome_cliente) as cliente_nome,
-        cl.cnpj as cliente_cnpj
-      FROM certificados c
-      LEFT JOIN clientes cl ON c.cliente_id = cl.id
-      WHERE c.data_vencimento BETWEEN DATE("now") AND DATE("now", "+30 days")
-      ORDER BY c.data_vencimento ASC
-      LIMIT 10
-      `
-    );
-
-    res.json({
-      sucesso: true,
-      dados: {
-        total,
-        ativos,
-        vencidos,
-        proximoVencer,
-        porTipo,
-        vencendoEmBreve
-      }
-    });
+    res.json(certificadoAtualizado);
 
   } catch (error) {
-    console.error('Erro ao buscar estatísticas de certificados:', error);
-    res.status(500).json({
-      sucesso: false,
-      mensagem: 'Erro ao buscar estatísticas de certificados',
-      erro: error.message
-    });
+    console.error('Erro ao atualizar certificado:', error);
+    res.status(500).json({ message: 'Erro ao atualizar certificado', error: error.message });
   }
 };
 
-module.exports = {
-  listarCertificados,
-  buscarCertificadoPorCliente,
-  atualizarCertificado,
-  criarCertificadoAvulso,
-  estatisticasCertificados
+// ========================================
+// EXCLUIR CERTIFICADO
+// ========================================
+exports.excluirCertificado = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const certificado = get('SELECT * FROM certificados WHERE id = ?', [id]);
+    if (!certificado) {
+      return res.status(404).json({ message: 'Certificado não encontrado' });
+    }
+
+    run('DELETE FROM certificados WHERE id = ?', [id]);
+
+    // Registrar auditoria
+    registrarAuditoria(
+      req.usuario?.id || 1,
+      'EXCLUIR',
+      'CERTIFICADOS',
+      certificado.nome_cliente,
+      `Excluiu certificado ${certificado.tipo_certificado}`,
+      req.ip
+    );
+
+    res.json({ message: 'Certificado excluído com sucesso' });
+
+  } catch (error) {
+    console.error('Erro ao excluir certificado:', error);
+    res.status(500).json({ message: 'Erro ao excluir certificado', error: error.message });
+  }
 };
+
+// ========================================
+// ESTATÍSTICAS DE CERTIFICADOS
+// ========================================
+exports.estatisticasCertificados = async (req, res) => {
+  try {
+    const total = get('SELECT COUNT(*) as count FROM certificados').count;
+    const ativos = get("SELECT COUNT(*) as count FROM certificados WHERE status = 'ATIVO'").count;
+    const vencidos = get("SELECT COUNT(*) as count FROM certificados WHERE status = 'VENCIDO'").count;
+    
+    const proximoVencer = get(`
+      SELECT COUNT(*) as count FROM certificados 
+      WHERE status = 'ATIVO'
+      AND date(data_vencimento) BETWEEN date('now') AND date('now', '+30 days')
+    `).count;
+
+    res.json({
+      total,
+      ativos,
+      vencidos,
+      proximoVencer
+    });
+
+  } catch (error) {
+    console.error('Erro ao buscar estatísticas:', error);
+    res.status(500).json({ message: 'Erro ao buscar estatísticas', error: error.message });
+  }
+};
+
+module.exports = exports;

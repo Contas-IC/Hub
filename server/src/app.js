@@ -1,84 +1,83 @@
 // arquivo: server/src/app.js
-require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const path = require('path');
+require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 // ========================================
 // MIDDLEWARES GLOBAIS
 // ========================================
+
+// Segurança
 app.use(helmet());
+
+// CORS
 app.use(cors({
   origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
   credentials: true
 }));
-app.use(morgan('dev'));
+
+// Parser de JSON
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Servir arquivos estáticos (uploads)
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+// Logs de requisições
+app.use(morgan('dev'));
 
 // ========================================
 // ROTAS
 // ========================================
-const authRoutes = require('./routes/authRoutes');
-const configRoutes = require('./routes/configRoutes');
-const usuariosRoutes = require('./routes/usuariosRoutes');
-const certificadosRoutes = require('./routes/certificadosRoutes');
-const clientesRoutes = require('./routes/clientesRoutes');
 
-app.use('/api/auth', authRoutes);
-app.use('/api/config', configRoutes);
-app.use('/api/usuarios', usuariosRoutes);
-app.use('/api/certificados', certificadosRoutes);
-app.use('/api/clientes', clientesRoutes);
+const routes = require('./routes');
 
-// Rota de teste
-app.get('/api/health', (req, res) => {
-  res.json({
-    success: true,
-    message: 'API Hub funcionando!',
-    timestamp: new Date().toISOString()
+app.use('/api', routes);
+
+// Rota raiz
+app.get('/', (req, res) => {
+  res.json({ 
+    message: 'API Hub - Sistema de Gestão Integrado',
+    version: '1.0.0',
+    modules: ['Legalização', 'Clientes', 'Certificados', 'Tarefas', 'Financeiros']
   });
 });
 
-// Rota 404
+// ========================================
+// TRATAMENTO DE ERROS
+// ========================================
+
+// Rota não encontrada
 app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Rota não encontrada'
-  });
+  res.status(404).json({ message: 'Rota não encontrada' });
 });
 
-// Error handler global
-app.use((err, req, res, next) => {
-  console.error('Erro global:', err);
-  res.status(500).json({
-    success: false,
-    message: 'Erro interno do servidor',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
+// Erro global
+app.use((error, req, res, next) => {
+  console.error('Erro:', error);
+  res.status(error.status || 500).json({
+    message: error.message || 'Erro interno do servidor',
+    error: process.env.NODE_ENV === 'development' ? error : {}
   });
 });
 
 // ========================================
 // INICIAR SERVIDOR
 // ========================================
+
+const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
-  console.log(`
-╔═══════════════════════════════════════════╗
-║     🚀 SERVIDOR HUB INICIADO 🚀          ║
-╠═══════════════════════════════════════════╣
-║  Porta: ${PORT}                              ║
-║  Ambiente: ${process.env.NODE_ENV || 'development'}            ║
-║  URL: http://localhost:${PORT}             ║
-╚═══════════════════════════════════════════╝
-  `);
+  console.log('');
+  console.log('='.repeat(60));
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
+  console.log(`📍 API: http://localhost:${PORT}/api`);
+  console.log(`🔍 Health Check: http://localhost:${PORT}/api/health`);
+  console.log(`🌍 Ambiente: ${process.env.NODE_ENV || 'development'}`);
+  console.log('='.repeat(60));
+  console.log('');
 });
 
 module.exports = app;

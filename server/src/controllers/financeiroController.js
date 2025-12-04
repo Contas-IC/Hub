@@ -1,6 +1,6 @@
-const Financeiro = require('../models/Financeiro');
-const Cliente = require('../models/Cliente');
-const Auditoria = require('../models/Auditoria');
+const Financeiro = require('../../models/Financeiro');
+const Cliente = require('../../models/Cliente');
+const Auditoria = require('../../models/Auditoria');
 
 const registrarAuditoria = async (usuario, acao, modulo, entidade, detalhes, ip) => {
   try {

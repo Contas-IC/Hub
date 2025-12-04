@@ -1,5 +1,5 @@
-const Configuracao = require('../models/Configuracao');
-const Auditoria = require('../models/Auditoria');
+const Configuracao = require('../../models/Configuracao');
+const Auditoria = require('../../models/Auditoria');
 
 const registrarAuditoria = async (usuario, acao, entidade, detalhes, ip) => {
   try {

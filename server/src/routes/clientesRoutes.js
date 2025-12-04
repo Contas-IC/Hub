@@ -1,30 +1,31 @@
 // arquivo: server/src/routes/clientesRoutes.js
+
 const express = require('express');
 const router = express.Router();
-
 const authMiddleware = require('../middlewares/auth');
 const { verificarPermissao } = require('../middlewares/permissoes');
-const clientesController = require('../controllers/clientesController');
+const clienteController = require('../controllers/clienteController');
 
 // Todas as rotas exigem autenticação
 router.use(authMiddleware);
+router.use(verificarPermissao('LEGALIZACAO'));
 
-// Listar clientes
-router.get('/', verificarPermissao('LEGALIZACAO'), clientesController.listarClientes);
+// GET /api/clientes/estatisticas - DEVE VIR ANTES de /:id
+router.get('/estatisticas', clienteController.estatisticasClientes);
 
-// Buscar por ID
-router.get('/:id', verificarPermissao('LEGALIZACAO'), clientesController.buscarClientePorId);
+// GET /api/clientes - Listar clientes
+router.get('/', clienteController.listarClientes);
 
-// Criar novo cliente
-router.post('/', verificarPermissao('LEGALIZACAO', true), clientesController.criarCliente);
+// GET /api/clientes/:id - Buscar por ID
+router.get('/:id', clienteController.buscarClientePorId);
 
-// Atualizar cliente
-router.put('/:id', verificarPermissao('LEGALIZACAO', true), clientesController.atualizarCliente);
+// POST /api/clientes - Criar novo cliente
+router.post('/', clienteController.criarCliente);
 
-// Atualizar dados financeiros (Legalização)
-router.put('/:id/financeiro', verificarPermissao('LEGALIZACAO', true), clientesController.atualizarFinanceiro);
+// PUT /api/clientes/:id - Atualizar cliente
+router.put('/:id', clienteController.atualizarCliente);
 
-// Excluir cliente
-router.delete('/:id', verificarPermissao('LEGALIZACAO', true), clientesController.excluirCliente);
+// DELETE /api/clientes/:id - Excluir cliente
+router.delete('/:id', clienteController.excluirCliente);
 
 module.exports = router;

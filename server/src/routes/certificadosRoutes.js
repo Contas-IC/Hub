@@ -1,27 +1,34 @@
 // arquivo: server/src/routes/certificadosRoutes.js
+
 const express = require('express');
 const router = express.Router();
-
 const authMiddleware = require('../middlewares/auth');
 const { verificarPermissao } = require('../middlewares/permissoes');
 const certificadoController = require('../controllers/certificadoController');
 
-// Todas as rotas de certificados exigem autenticação
+// Todas as rotas exigem autenticação
 router.use(authMiddleware);
+router.use(verificarPermissao('LEGALIZACAO'));
 
-// Listar certificados com filtros (status, vencimento, clienteId)
-router.get('/', verificarPermissao('LEGALIZACAO'), certificadoController.listarCertificados);
+// GET /api/certificados/estatisticas - DEVE VIR ANTES de rotas com :id
+router.get('/estatisticas', certificadoController.estatisticasCertificados);
 
-// Estatísticas gerais de certificados
-router.get('/estatisticas', verificarPermissao('LEGALIZACAO'), certificadoController.estatisticasCertificados);
+// GET /api/certificados - Listar certificados
+router.get('/', certificadoController.listarCertificados);
 
-// Buscar certificados por cliente
-router.get('/cliente/:clienteId', verificarPermissao('LEGALIZACAO'), certificadoController.buscarCertificadoPorCliente);
+// GET /api/certificados/cliente/:clienteId - Buscar por cliente
+router.get('/cliente/:clienteId', certificadoController.buscarCertificadoPorCliente);
 
-// Criar/Atualizar certificado de um cliente
-router.put('/cliente/:clienteId', verificarPermissao('LEGALIZACAO', true), certificadoController.atualizarCertificado);
+// GET /api/certificados/:id - Buscar certificado por ID
+router.get('/:id', certificadoController.buscarCertificadoPorId);
 
-// Criar certificado avulso (sem cliente cadastrado)
-router.post('/', verificarPermissao('LEGALIZACAO', true), certificadoController.criarCertificadoAvulso);
+// POST /api/certificados - Criar certificado
+router.post('/', certificadoController.criarCertificado);
+
+// PUT /api/certificados/:id - Atualizar certificado
+router.put('/:id', certificadoController.atualizarCertificado);
+
+// DELETE /api/certificados/:id - Excluir certificado
+router.delete('/:id', certificadoController.excluirCertificado);
 
 module.exports = router;

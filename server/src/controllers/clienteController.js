@@ -1,7 +1,7 @@
-const Cliente = require('../models/Cliente');
-const Financeiro = require('../models/Financeiro');
-const Certificado = require('../models/Certificado');
-const Auditoria = require('../models/Auditoria');
+const Cliente = require('../../models/Cliente');
+const Financeiro = require('../../models/Financeiro');
+const Certificado = require('../../models/Certificado');
+const Auditoria = require('../../models/Auditoria');
 
 // Função auxiliar para registrar auditoria
 const registrarAuditoria = async (usuario, acao, modulo, entidade, detalhes, ip) => {

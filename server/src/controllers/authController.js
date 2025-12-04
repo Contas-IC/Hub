@@ -1,131 +1,155 @@
 // arquivo: server/src/controllers/authController.js
+
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { query, run } = require('../config/database');
+const { get, run, query } = require('../config/database');
 
-// Login
+// Função auxiliar para registrar auditoria
+const registrarAuditoria = (usuarioId, acao, detalhes, ip) => {
+  try {
+    run(`
+      INSERT INTO auditoria (usuario_id, acao, modulo, entidade, detalhes, ip)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [usuarioId, acao, 'AUTENTICACAO', 'Login', detalhes, ip]);
+  } catch (error) {
+    console.error('Erro ao registrar auditoria:', error);
+  }
+};
+
+// ========================================
+// LOGIN
+// ========================================
 exports.login = async (req, res) => {
   try {
     const { email, senha } = req.body;
 
-    // Validar entrada
+    // Validar campos
     if (!email || !senha) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email e senha são obrigatórios'
-      });
+      return res.status(400).json({ message: 'Email e senha são obrigatórios' });
     }
 
-    // Buscar usuário
-    const usuario = query(
-      'SELECT * FROM usuarios WHERE email = ? AND ativo = 1',
-      [email]
-    )[0];
+    // Buscar usuário por email
+    const usuario = get('SELECT * FROM usuarios WHERE email = ?', [email]);
 
     if (!usuario) {
-      return res.status(401).json({
-        success: false,
-        message: 'Credenciais inválidas'
-      });
+      registrarAuditoria(null, 'FALHA_LOGIN', `Tentativa de login com email inexistente: ${email}`, req.ip);
+      return res.status(401).json({ message: 'Email ou senha incorretos' });
+    }
+
+    // Verificar se usuário está ativo
+    if (!usuario.ativo) {
+      registrarAuditoria(usuario.id, 'FALHA_LOGIN', 'Tentativa de login com usuário inativo', req.ip);
+      return res.status(401).json({ message: 'Usuário inativo. Entre em contato com o administrador.' });
     }
 
     // Verificar senha
-    const senhaValida = await bcrypt.compare(senha, usuario.senha);
+    const senhaValida = await bcrypt.compare(senha, usuario.senha_hash);
 
     if (!senhaValida) {
-      return res.status(401).json({
-        success: false,
-        message: 'Credenciais inválidas'
-      });
+      registrarAuditoria(usuario.id, 'FALHA_LOGIN', 'Senha incorreta', req.ip);
+      return res.status(401).json({ message: 'Email ou senha incorretos' });
     }
 
     // Buscar permissões do usuário
-    let permissoes = [];
-    if (usuario.cargo === 'admin') {
-      permissoes = ['ADMIN', 'LEGALIZACAO', 'ONBOARDING', 'CONTABIL', 'FISCAL', 'DP'];
-    } else {
-      permissoes = query(
-        'SELECT modulo FROM permissoes_usuarios WHERE usuario_id = ?',
-        [usuario.id]
-      ).map(p => p.modulo);
-    }
+    const permissoes = query(`
+      SELECT modulo, pode_visualizar, pode_editar 
+      FROM permissoes_usuarios 
+      WHERE usuario_id = ?
+    `, [usuario.id]);
 
-    // Gerar token
+    // Gerar token JWT
     const token = jwt.sign(
-      {
+      { 
         id: usuario.id,
         email: usuario.email,
-        nome: usuario.nome,
-        cargo: usuario.cargo
+        nome: usuario.nome
       },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 
+    // Registrar login bem-sucedido
+    registrarAuditoria(usuario.id, 'LOGIN', 'Login realizado com sucesso', req.ip);
+
+    // Retornar dados do usuário (sem senha) e token
     res.json({
-      success: true,
-      message: 'Login realizado com sucesso',
-      data: {
-        token,
-        usuario: {
-          id: usuario.id,
-          nome: usuario.nome,
-          email: usuario.email,
-          cargo: usuario.cargo
-        },
-        permissoes
+      token,
+      usuario: {
+        id: usuario.id,
+        nome: usuario.nome,
+        email: usuario.email,
+        cargo: usuario.cargo,
+        ativo: usuario.ativo,
+        permissoes: permissoes.reduce((acc, p) => {
+          acc[p.modulo] = {
+            visualizar: p.pode_visualizar === 1,
+            editar: p.pode_editar === 1
+          };
+          return acc;
+        }, {})
       }
     });
+
   } catch (error) {
     console.error('Erro no login:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao realizar login',
-      error: error.message
-    });
+    res.status(500).json({ message: 'Erro ao realizar login', error: error.message });
   }
 };
 
-// Verificar token (para manter sessão)
+// ========================================
+// VERIFICAR TOKEN
+// ========================================
 exports.verificarToken = async (req, res) => {
   try {
-    // Se chegou aqui, o token já foi validado pelo middleware
-    const usuario = query(
-      'SELECT id, nome, email, cargo FROM usuarios WHERE id = ? AND ativo = 1',
-      [req.usuarioId]
-    )[0];
+    // O middleware de autenticação já validou o token e adicionou req.usuario
+    const usuario = get('SELECT * FROM usuarios WHERE id = ?', [req.usuario.id]);
 
-    if (!usuario) {
-      return res.status(404).json({
-        success: false,
-        message: 'Usuário não encontrado'
-      });
+    if (!usuario || !usuario.ativo) {
+      return res.status(401).json({ message: 'Token inválido ou usuário inativo' });
     }
 
-    // Buscar permissões
-    let permissoes = [];
-    if (usuario.cargo === 'admin') {
-      permissoes = ['ADMIN', 'LEGALIZACAO', 'ONBOARDING', 'CONTABIL', 'FISCAL', 'DP'];
-    } else {
-      permissoes = query(
-        'SELECT modulo FROM permissoes_usuarios WHERE usuario_id = ?',
-        [usuario.id]
-      ).map(p => p.modulo);
-    }
+    // Buscar permissões atualizadas
+    const permissoes = query(`
+      SELECT modulo, pode_visualizar, pode_editar 
+      FROM permissoes_usuarios 
+      WHERE usuario_id = ?
+    `, [usuario.id]);
 
     res.json({
-      success: true,
-      data: {
-        usuario,
-        permissoes
+      valido: true,
+      usuario: {
+        id: usuario.id,
+        nome: usuario.nome,
+        email: usuario.email,
+        cargo: usuario.cargo,
+        ativo: usuario.ativo,
+        permissoes: permissoes.reduce((acc, p) => {
+          acc[p.modulo] = {
+            visualizar: p.pode_visualizar === 1,
+            editar: p.pode_editar === 1
+          };
+          return acc;
+        }, {})
       }
     });
+
   } catch (error) {
     console.error('Erro ao verificar token:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao verificar token',
-      error: error.message
-    });
+    res.status(500).json({ message: 'Erro ao verificar token', error: error.message });
   }
 };
+
+// ========================================
+// LOGOUT (Opcional - apenas registra auditoria)
+// ========================================
+exports.logout = async (req, res) => {
+  try {
+    registrarAuditoria(req.usuario.id, 'LOGOUT', 'Logout realizado', req.ip);
+    res.json({ message: 'Logout realizado com sucesso' });
+  } catch (error) {
+    console.error('Erro no logout:', error);
+    res.status(500).json({ message: 'Erro ao realizar logout', error: error.message });
+  }
+};
+
+module.exports = exports;

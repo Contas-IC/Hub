@@ -1,13 +1,52 @@
-// arquivo: server/src/routes/authRoutes.js
-const express = require('express');
-const router = express.Router();
-const authController = require('../controllers/authController');
-const authMiddleware = require('../middlewares/auth');
+// arquivo: server/src/middlewares/auth.js
 
-// Rotas públicas
-router.post('/login', authController.login);
+const jwt = require('jsonwebtoken');
+const { get } = require('../config/database');
 
-// Rotas protegidas
-router.get('/verificar', authMiddleware, authController.verificarToken);
+module.exports = (req, res, next) => {
+  try {
+    // Obter token do header Authorization
+    const authHeader = req.headers.authorization;
 
-module.exports = router;
+    if (!authHeader) {
+      return res.status(401).json({ message: 'Token não fornecido' });
+    }
+
+    // Formato: "Bearer TOKEN"
+    const parts = authHeader.split(' ');
+
+    if (parts.length !== 2 || parts[0] !== 'Bearer') {
+      return res.status(401).json({ message: 'Formato de token inválido' });
+    }
+
+    const token = parts[1];
+
+    // Verificar token
+    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+      if (err) {
+        return res.status(401).json({ message: 'Token inválido ou expirado' });
+      }
+
+      // Buscar usuário no banco
+      const usuario = get('SELECT * FROM usuarios WHERE id = ? AND ativo = 1', [decoded.id]);
+
+      if (!usuario) {
+        return res.status(401).json({ message: 'Usuário não encontrado ou inativo' });
+      }
+
+      // Adicionar usuário ao request
+      req.usuario = {
+        id: usuario.id,
+        nome: usuario.nome,
+        email: usuario.email,
+        cargo: usuario.cargo
+      };
+
+      next();
+    });
+
+  } catch (error) {
+    console.error('Erro no middleware de autenticação:', error);
+    return res.status(500).json({ message: 'Erro na autenticação' });
+  }
+};

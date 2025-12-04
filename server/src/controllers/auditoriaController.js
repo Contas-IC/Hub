@@ -1,98 +1,25 @@
-// server/src/controllers/auditoriaController.js
+// arquivo: server/src/controllers/auditoriaController.js
 
-const { query, get, run } = require('../config/database');
+const { query, get } = require('../config/database');
 
-// Registrar auditoria
-const registrarAuditoria = async (req, res) => {
-  try {
-    const {
-      usuario_id,
-      acao,
-      tabela,
-      registro_id,
-      dados_anteriores,
-      dados_novos,
-      ip_address,
-      user_agent
-    } = req.body;
-
-    // Validações
-    if (!usuario_id || !acao || !tabela) {
-      return res.status(400).json({
-        sucesso: false,
-        mensagem: 'Usuário, ação e tabela são obrigatórios'
-      });
-    }
-
-    const resultado = run(
-      `
-      INSERT INTO auditoria (
-        usuario_id,
-        acao,
-        tabela,
-        registro_id,
-        dados_anteriores,
-        dados_novos,
-        ip_address,
-        user_agent,
-        criado_em
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-      `,
-      [
-        usuario_id,
-        acao,
-        tabela,
-        registro_id || null,
-        dados_anteriores ? JSON.stringify(dados_anteriores) : null,
-        dados_novos ? JSON.stringify(dados_novos) : null,
-        ip_address || null,
-        user_agent || null
-      ]
-    );
-
-    res.status(201).json({
-      sucesso: true,
-      mensagem: 'Auditoria registrada com sucesso',
-      dados: {
-        id: resultado.lastInsertRowid
-      }
-    });
-
-  } catch (error) {
-    console.error('Erro ao registrar auditoria:', error);
-    res.status(500).json({
-      sucesso: false,
-      mensagem: 'Erro ao registrar auditoria',
-      erro: error.message
-    });
-  }
-};
-
-// Listar auditorias
-const listarAuditorias = async (req, res) => {
+// ========================================
+// LISTAR AUDITORIA COM FILTROS
+// ========================================
+exports.listarAuditoria = async (req, res) => {
   try {
     const { 
-      usuario_id, 
+      usuarioId, 
+      modulo, 
       acao, 
-      tabela, 
-      data_inicio, 
-      data_fim,
-      limite = 50,
-      pagina = 1
+      dataInicio, 
+      dataFim, 
+      page = 1, 
+      limit = 50 
     } = req.query;
 
-    let query = `
+    let sql = `
       SELECT 
-        a.id,
-        a.usuario_id,
-        a.acao,
-        a.tabela,
-        a.registro_id,
-        a.dados_anteriores,
-        a.dados_novos,
-        a.ip_address,
-        a.user_agent,
-        a.criado_em,
+        a.*,
         u.nome as usuario_nome,
         u.email as usuario_email
       FROM auditoria a
@@ -102,223 +29,154 @@ const listarAuditorias = async (req, res) => {
 
     const params = [];
 
-    // Filtros
-    if (usuario_id) {
-      query += ' AND a.usuario_id = ?';
-      params.push(usuario_id);
+    if (usuarioId) {
+      sql += ' AND a.usuario_id = ?';
+      params.push(usuarioId);
+    }
+
+    if (modulo) {
+      sql += ' AND a.modulo = ?';
+      params.push(modulo);
     }
 
     if (acao) {
-      query += ' AND a.acao = ?';
+      sql += ' AND a.acao = ?';
       params.push(acao);
     }
 
-    if (tabela) {
-      query += ' AND a.tabela = ?';
-      params.push(tabela);
+    if (dataInicio) {
+      sql += ' AND date(a.data_hora) >= date(?)';
+      params.push(dataInicio);
     }
 
-    if (data_inicio) {
-      query += ' AND DATE(a.criado_em) >= ?';
-      params.push(data_inicio);
+    if (dataFim) {
+      sql += ' AND date(a.data_hora) <= date(?)';
+      params.push(dataFim);
     }
 
-    if (data_fim) {
-      query += ' AND DATE(a.criado_em) <= ?';
-      params.push(data_fim);
-    }
-
-    query += ' ORDER BY a.criado_em DESC';
+    // Contagem total
+    const countSql = sql.replace('SELECT a.*, u.nome as usuario_nome, u.email as usuario_email', 'SELECT COUNT(*) as total');
+    const total = get(countSql, params).total;
 
     // Paginação
-    const offset = (pagina - 1) * limite;
-    query += ' LIMIT ? OFFSET ?';
-    params.push(parseInt(limite), offset);
+    sql += ' ORDER BY a.data_hora DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), (parseInt(page) - 1) * parseInt(limit));
 
-    const auditorias = query(query, params);
-
-    // Parsear JSON dos dados
-    const auditoriasFormatadas = auditorias.map(auditoria => ({
-      ...auditoria,
-      dados_anteriores: auditoria.dados_anteriores ? JSON.parse(auditoria.dados_anteriores) : null,
-      dados_novos: auditoria.dados_novos ? JSON.parse(auditoria.dados_novos) : null
-    }));
-
-    // Contar total
-    let countQuery = 'SELECT COUNT(*) as total FROM auditoria WHERE 1=1';
-    const countParams = [];
-
-    if (usuario_id) {
-      countQuery += ' AND usuario_id = ?';
-      countParams.push(usuario_id);
-    }
-
-    if (acao) {
-      countQuery += ' AND acao = ?';
-      countParams.push(acao);
-    }
-
-    if (tabela) {
-      countQuery += ' AND tabela = ?';
-      countParams.push(tabela);
-    }
-
-    if (data_inicio) {
-      countQuery += ' AND DATE(criado_em) >= ?';
-      countParams.push(data_inicio);
-    }
-
-    if (data_fim) {
-      countQuery += ' AND DATE(criado_em) <= ?';
-      countParams.push(data_fim);
-    }
-
-    const { total } = get(countQuery, countParams);
+    const registros = query(sql, params);
 
     res.json({
-      sucesso: true,
-      dados: auditoriasFormatadas,
-      paginacao: {
-        total,
-        pagina: parseInt(pagina),
-        limite: parseInt(limite),
-        totalPaginas: Math.ceil(total / limite)
-      }
+      registros,
+      totalPages: Math.ceil(total / limit),
+      currentPage: parseInt(page),
+      total
     });
 
   } catch (error) {
-    console.error('Erro ao listar auditorias:', error);
-    res.status(500).json({
-      sucesso: false,
-      mensagem: 'Erro ao listar auditorias',
-      erro: error.message
-    });
+    console.error('Erro ao listar auditoria:', error);
+    res.status(500).json({ message: 'Erro ao listar auditoria', error: error.message });
   }
 };
 
-// Auditorias recentes
-const auditoriasRecentes = async (req, res) => {
+// ========================================
+// LISTAR POR USUÁRIO
+// ========================================
+exports.listarPorUsuario = async (req, res) => {
   try {
-    const { limite = 20 } = req.query;
+    const { usuarioId } = req.params;
+    const { limit = 100 } = req.query;
 
-    const auditorias = query(
-      `
+    const registros = query(`
       SELECT 
-        a.id,
-        a.usuario_id,
-        a.acao,
-        a.tabela,
-        a.registro_id,
-        a.criado_em,
-        u.nome as usuario_nome
+        a.*,
+        u.nome as usuario_nome,
+        u.email as usuario_email
       FROM auditoria a
       LEFT JOIN usuarios u ON a.usuario_id = u.id
-      ORDER BY a.criado_em DESC
+      WHERE a.usuario_id = ?
+      ORDER BY a.data_hora DESC
       LIMIT ?
-      `,
-      [parseInt(limite)]
-    );
+    `, [usuarioId, parseInt(limit)]);
 
-    res.json({
-      sucesso: true,
-      dados: auditorias
-    });
+    res.json(registros);
 
   } catch (error) {
-    console.error('Erro ao buscar auditorias recentes:', error);
-    res.status(500).json({
-      sucesso: false,
-      mensagem: 'Erro ao buscar auditorias recentes',
-      erro: error.message
-    });
+    console.error('Erro ao listar auditoria por usuário:', error);
+    res.status(500).json({ message: 'Erro ao listar auditoria', error: error.message });
   }
 };
 
-// Estatísticas de auditoria
-const estatisticasAuditoria = async (req, res) => {
+// ========================================
+// LISTAR POR MÓDULO
+// ========================================
+exports.listarPorModulo = async (req, res) => {
   try {
-    // Total de registros
-    const { total } = get('SELECT COUNT(*) as total FROM auditoria');
+    const { modulo } = req.params;
+    const { limit = 100 } = req.query;
 
-    // Registros por ação
-    const porAcao = query(`
-      SELECT acao, COUNT(*) as quantidade
-      FROM auditoria
-      GROUP BY acao
-    `);
-
-    // Registros por tabela
-    const porTabela = query(`
-      SELECT tabela, COUNT(*) as quantidade
-      FROM auditoria
-      GROUP BY tabela
-      ORDER BY quantidade DESC
-      LIMIT 10
-    `);
-
-    // Registros por usuário
-    const porUsuario = query(`
+    const registros = query(`
       SELECT 
-        u.nome as usuario,
-        COUNT(a.id) as quantidade
+        a.*,
+        u.nome as usuario_nome,
+        u.email as usuario_email
       FROM auditoria a
       LEFT JOIN usuarios u ON a.usuario_id = u.id
-      GROUP BY a.usuario_id
-      ORDER BY quantidade DESC
-      LIMIT 10
-    `);
+      WHERE a.modulo = ?
+      ORDER BY a.data_hora DESC
+      LIMIT ?
+    `, [modulo, parseInt(limit)]);
 
-    // Atividades por dia (últimos 7 dias)
-    const porDia = query(`
-      SELECT 
-        DATE(criado_em) as data,
-        COUNT(*) as quantidade
-      FROM auditoria
-      WHERE criado_em >= DATE('now', '-7 days')
-      GROUP BY DATE(criado_em)
-      ORDER BY data ASC
-    `);
-
-    // Registros de hoje
-    const { total: hoje } = get(`
-      SELECT COUNT(*) as total
-      FROM auditoria
-      WHERE DATE(criado_em) = DATE('now')
-    `);
-
-    // Registros desta semana
-    const { total: semana } = get(`
-      SELECT COUNT(*) as total
-      FROM auditoria
-      WHERE criado_em >= DATE('now', '-7 days')
-    `);
-
-    res.json({
-      sucesso: true,
-      dados: {
-        total,
-        hoje,
-        semana,
-        porAcao,
-        porTabela,
-        porUsuario,
-        porDia
-      }
-    });
+    res.json(registros);
 
   } catch (error) {
-    console.error('Erro ao buscar estatísticas de auditoria:', error);
-    res.status(500).json({
-      sucesso: false,
-      mensagem: 'Erro ao buscar estatísticas de auditoria',
-      erro: error.message
-    });
+    console.error('Erro ao listar auditoria por módulo:', error);
+    res.status(500).json({ message: 'Erro ao listar auditoria', error: error.message });
   }
 };
 
-module.exports = {
-  registrarAuditoria,
-  listarAuditorias,
-  auditoriasRecentes,
-  estatisticasAuditoria
+// ========================================
+// ESTATÍSTICAS DE AUDITORIA
+// ========================================
+exports.estatisticasAuditoria = async (req, res) => {
+  try {
+    const totalRegistros = get('SELECT COUNT(*) as count FROM auditoria').count;
+
+    const porAcao = query(`
+      SELECT acao, COUNT(*) as total 
+      FROM auditoria 
+      GROUP BY acao 
+      ORDER BY total DESC
+    `);
+
+    const porModulo = query(`
+      SELECT modulo, COUNT(*) as total 
+      FROM auditoria 
+      GROUP BY modulo 
+      ORDER BY total DESC
+    `);
+
+    const usuariosMaisAtivos = query(`
+      SELECT 
+        u.nome,
+        u.email,
+        COUNT(a.id) as total_acoes
+      FROM auditoria a
+      INNER JOIN usuarios u ON a.usuario_id = u.id
+      GROUP BY u.id
+      ORDER BY total_acoes DESC
+      LIMIT 10
+    `);
+
+    res.json({
+      totalRegistros,
+      porAcao,
+      porModulo,
+      usuariosMaisAtivos
+    });
+
+  } catch (error) {
+    console.error('Erro ao buscar estatísticas:', error);
+    res.status(500).json({ message: 'Erro ao buscar estatísticas', error: error.message });
+  }
 };
+
+module.exports = exports;
