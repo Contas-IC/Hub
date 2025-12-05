@@ -2,9 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { Search, Plus, Edit2, Eye, Trash2, Award, CheckCircle, XCircle, Clock, AlertCircle } from 'lucide-react';
-import ModalNovoCertificado from '../../components/Legalizacao/ModalNovoCertificado';
-import ModalDetalhesCertificado from '../../components/Legalizacao/ModalDetalhesCertificado';
-import ModalGerenciarCertificado from '../../components/Legalizacao/ModalGerenciarCertificado';
+import ModalNovoCertificado from './components/ModalNovoCertificado';
+import ModalDetalhesCertificado from './components/ModalDetalhesCertificado';
+import ModalGerenciarCertificado from './components/ModalGerenciarCertificado';
 import { certificados } from '../../services/api';
 
 export default function Certificados() {

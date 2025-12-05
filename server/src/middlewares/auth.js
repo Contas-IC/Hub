@@ -22,7 +22,8 @@ module.exports = (req, res, next) => {
     const token = parts[1];
 
     // Verificar token
-    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+    const secret = process.env.JWT_SECRET || 'hub-dev-secret';
+    jwt.verify(token, secret, (err, decoded) => {
       if (err) {
         return res.status(401).json({ message: 'Token inválido ou expirado' });
       }

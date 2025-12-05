@@ -12,7 +12,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { tarefas } from '../../services/api';
-import ModalNovaTarefa from '../../components/Legalizacao/ModalNovaTarefa';
+import ModalNovaTarefa from './components/ModalNovaTarefa';
 
 export default function Agenda() {
   const [tarefasLista, setTarefasLista] = useState([]);

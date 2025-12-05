@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { Search, Plus, Edit2, Trash2, Eye } from 'lucide-react';
-import ModalCadastroCliente from '../../components/Legalizacao/ModalCadastroCliente';
-import ModalDetalhesCliente from '../../components/Legalizacao/ModalDetalhesCliente';
+import ModalCadastroCliente from './components/ModalCadastroCliente';
+import ModalDetalhesCliente from './components/ModalDetalhesCliente';
 import { clientes } from '../../services/api';
 
 export default function Clientes() {

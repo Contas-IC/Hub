@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   nome TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
-  senha TEXT NOT NULL,
+  senha_hash TEXT NOT NULL,
   cargo TEXT DEFAULT 'usuario',
   ativo INTEGER DEFAULT 1,
   tema TEXT DEFAULT 'claro', -- ADICIONAR ESTA LINHA
@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS permissoes_usuarios (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   usuario_id INTEGER NOT NULL,
   modulo TEXT NOT NULL CHECK(modulo IN ('ADMIN', 'LEGALIZACAO', 'ONBOARDING', 'CONTABIL', 'FISCAL', 'DP')),
+  pode_visualizar INTEGER DEFAULT 1,
   pode_editar INTEGER DEFAULT 0,  -- 0 = só visualizar, 1 = editar
   data_criacao TEXT DEFAULT (datetime('now', 'localtime')),
   

@@ -19,7 +19,7 @@ try {
   const senhaHash = bcrypt.hashSync('admin123', 10);
   
   db.prepare(`
-    INSERT OR IGNORE INTO usuarios (id, nome, email, senha, cargo, ativo)
+    INSERT OR IGNORE INTO usuarios (id, nome, email, senha_hash, cargo, ativo)
     VALUES (1, 'Administrador', 'admin@hub.com', ?, 'admin', 1)
   `).run(senhaHash);
 

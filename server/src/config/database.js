@@ -41,6 +41,18 @@ try {
     
     CREATE INDEX IF NOT EXISTS idx_usuarios_email ON usuarios(email);
 
+    -- TABELA DE PERMISSÕES DE USUÁRIOS
+    CREATE TABLE IF NOT EXISTS permissoes_usuarios (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      usuario_id INTEGER NOT NULL,
+      modulo TEXT NOT NULL,
+      pode_visualizar INTEGER DEFAULT 1,
+      pode_editar INTEGER DEFAULT 0,
+      FOREIGN KEY(usuario_id) REFERENCES usuarios(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_permissoes_usuario ON permissoes_usuarios(usuario_id);
+    CREATE INDEX IF NOT EXISTS idx_permissoes_modulo ON permissoes_usuarios(modulo);
+
     -- ========================================
     -- TABELA DE CLIENTES (COMPLETA)
     -- ========================================
@@ -215,6 +227,21 @@ try {
     CREATE INDEX IF NOT EXISTS idx_tarefas_cliente ON tarefas(cliente_id);
 
     -- ========================================
+    -- TABELA DE CONFIGURAÇÕES
+    -- ========================================
+    CREATE TABLE IF NOT EXISTS configuracoes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chave TEXT NOT NULL UNIQUE,
+      valor REAL,
+      descricao TEXT,
+      atualizado_por INTEGER,
+      atualizado_em TEXT DEFAULT (datetime('now','localtime')),
+      FOREIGN KEY(atualizado_por) REFERENCES usuarios(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_config_chave ON configuracoes(chave);
+
+    -- ========================================
     -- TABELA DE AUDITORIA
     -- ========================================
     CREATE TABLE IF NOT EXISTS auditoria (
@@ -232,9 +259,30 @@ try {
     CREATE INDEX IF NOT EXISTS idx_auditoria_usuario ON auditoria(usuario_id);
     CREATE INDEX IF NOT EXISTS idx_auditoria_modulo ON auditoria(modulo);
     CREATE INDEX IF NOT EXISTS idx_auditoria_data ON auditoria(data_hora);
+
   `);
 
   console.log('✅ Tabelas verificadas/criadas com sucesso');
+
+  // Migrações leves para compatibilidade com schemas antigos
+  try {
+    const usuariosCols = db.prepare("PRAGMA table_info(usuarios)").all();
+    const hasSenhaHash = usuariosCols.some(c => c.name === 'senha_hash');
+    const hasSenha = usuariosCols.some(c => c.name === 'senha');
+    if (!hasSenhaHash && hasSenha) {
+      db.exec('ALTER TABLE usuarios RENAME COLUMN senha TO senha_hash');
+      console.log('🔧 Migração: coluna usuarios.senha renomeada para senha_hash');
+    }
+
+    const permCols = db.prepare("PRAGMA table_info(permissoes_usuarios)").all();
+    const hasPodeVisualizar = permCols.some(c => c.name === 'pode_visualizar');
+    if (!hasPodeVisualizar) {
+      db.exec('ALTER TABLE permissoes_usuarios ADD COLUMN pode_visualizar INTEGER DEFAULT 1');
+      console.log('🔧 Migração: adicionada coluna permissoes_usuarios.pode_visualizar');
+    }
+  } catch (migErr) {
+    console.warn('⚠️ Falha ao executar migrações leves:', migErr.message);
+  }
   
   // Criar usuário admin padrão se não existir
   const adminExists = db.prepare('SELECT id FROM usuarios WHERE email = ?').get('admin@hub.com');

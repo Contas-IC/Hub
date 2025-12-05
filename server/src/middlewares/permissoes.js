@@ -9,10 +9,10 @@ const { query } = require('../config/database');
 function verificarPermissao(modulo, precisaEditar = false) {
   return async (req, res, next) => {
     try {
-      const usuarioId = req.usuarioId;
+      const usuarioId = req.usuario && req.usuario.id;
 
       // Admin tem acesso a tudo
-      if (req.usuarioCargo === 'admin') {
+      if (req.usuario && req.usuario.cargo && String(req.usuario.cargo).toLowerCase().includes('admin')) {
         req.podeEditar = true;
         return next();
       }
@@ -56,10 +56,10 @@ function verificarPermissao(modulo, precisaEditar = false) {
  */
 function obterPermissoesUsuario(req, res, next) {
   try {
-    const usuarioId = req.usuarioId;
+    const usuarioId = req.usuario && req.usuario.id;
 
     // Admin tem todas as permissões
-    if (req.usuarioCargo === 'admin') {
+    if (req.usuario && req.usuario.cargo && String(req.usuario.cargo).toLowerCase().includes('admin')) {
       req.permissoes = [
         { modulo: 'ADMIN', pode_editar: 1 },
         { modulo: 'LEGALIZACAO', pode_editar: 1 },

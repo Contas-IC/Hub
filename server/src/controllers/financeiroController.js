@@ -1,97 +1,144 @@
-const Financeiro = require('../../models/Financeiro');
-const Cliente = require('../../models/Cliente');
-const Auditoria = require('../../models/Auditoria');
+const { query, get, run } = require('../config/database');
 
-const registrarAuditoria = async (usuario, acao, modulo, entidade, detalhes, ip) => {
+function registrarAuditoria(usuarioId, acao, entidade, detalhes, ip) {
   try {
-    await Auditoria.create({ usuario, acao, modulo, entidade, detalhes, ip });
+    run(
+      `INSERT INTO auditoria (usuario_id, acao, modulo, entidade, detalhes, ip)
+       VALUES (?, ?, 'FINANCEIROS', ?, ?, ?)`,
+      [usuarioId, acao, entidade, detalhes, ip]
+    );
   } catch (error) {
     console.error('Erro ao registrar auditoria:', error);
   }
-};
+}
 
-// Listar todos os financeiros com dados dos clientes
+// Listar todos os financeiros com dados dos clientes (SQLite)
 exports.listarFinanceiros = async (req, res) => {
   try {
     const { busca } = req.query;
-    
-    let query = {};
-    
+
+    let sql = `
+      SELECT 
+        c.id AS id,
+        c.id AS cliente_id,
+        c.codigo AS cliente_codigo,
+        c.nome_empresa AS cliente_nome,
+        c.cnpj AS cliente_cnpj,
+        l.tipo_cobranca,
+        l.percentual_cobranca AS percentual_salario_minimo,
+        l.dia_vencimento
+      FROM clientes c
+      LEFT JOIN legalizacao l ON l.cliente_id = c.id
+      WHERE 1=1
+    `;
+
+    const params = [];
+
     if (busca) {
-      const clientes = await Cliente.find({
-        $or: [
-          { nome: { $regex: busca, $options: 'i' } },
-          { cnpj: { $regex: busca, $options: 'i' } },
-          { codigo: { $regex: busca, $options: 'i' } }
-        ]
-      }).select('_id');
-      
-      const clienteIds = clientes.map(c => c._id);
-      query.cliente = { $in: clienteIds };
+      sql += ' AND (c.nome_empresa LIKE ? OR c.cnpj LIKE ? OR c.codigo LIKE ?)';
+      const like = `%${busca}%`;
+      params.push(like, like, like);
     }
-    
-    const financeiros = await Financeiro.find(query)
-      .populate('cliente', 'codigo nome cnpj')
-      .sort({ updatedAt: -1 });
-    
-    res.json(financeiros);
+
+    sql += ' ORDER BY c.data_cadastro DESC';
+
+    const rows = query(sql, params);
+    res.json(rows);
   } catch (error) {
     console.error('Erro ao listar financeiros:', error);
     res.status(500).json({ message: 'Erro ao listar financeiros', error: error.message });
   }
 };
 
-// Buscar financeiro por ID do cliente
+// Buscar financeiro por ID do cliente (SQLite)
 exports.buscarFinanceiroPorCliente = async (req, res) => {
   try {
     const { clienteId } = req.params;
-    
-    let financeiro = await Financeiro.findOne({ cliente: clienteId })
-      .populate('cliente', 'codigo nome cnpj');
-    
-    // Se não existir, criar
-    if (!financeiro) {
-      financeiro = await Financeiro.create({
-        cliente: clienteId,
-        criadoPor: req.usuario.id
-      });
-      financeiro = await Financeiro.findById(financeiro._id)
-        .populate('cliente', 'codigo nome cnpj');
+
+    const cliente = get(
+      `SELECT id, codigo, nome_empresa AS nome, cnpj FROM clientes WHERE id = ?`,
+      [clienteId]
+    );
+
+    if (!cliente) {
+      return res.status(404).json({ message: 'Cliente não encontrado' });
     }
-    
-    res.json(financeiro);
+
+    const legal = get(
+      `SELECT 
+         tipo_cobranca AS cobranca,
+         percentual_cobranca AS percentual,
+         valor_cobranca AS valor,
+         dia_vencimento AS vencimento,
+         observacoes AS observacao
+       FROM legalizacao
+       WHERE cliente_id = ?`,
+      [clienteId]
+    );
+
+    const financeiro = legal || { cobranca: '', percentual: '', valor: '', vencimento: '', observacao: '' };
+
+    res.json({ ...cliente, financeiro });
   } catch (error) {
     console.error('Erro ao buscar financeiro:', error);
     res.status(500).json({ message: 'Erro ao buscar financeiro', error: error.message });
   }
 };
 
-// Atualizar dados financeiros
+// Atualizar dados financeiros (SQLite)
 exports.atualizarFinanceiro = async (req, res) => {
   try {
     const { clienteId } = req.params;
-    const dadosAtualizacao = {
-      ...req.body,
-      atualizadoPor: req.usuario.id
-    };
-    
-    let financeiro = await Financeiro.findOneAndUpdate(
-      { cliente: clienteId },
-      dadosAtualizacao,
-      { new: true, upsert: true, runValidators: true }
-    ).populate('cliente', 'codigo nome cnpj');
-    
-    // Registrar auditoria
-    await registrarAuditoria(
-      req.usuario.id,
+    const { cobranca, percentual, valor, vencimento, observacao } = req.body || {};
+
+    const cliente = get('SELECT id, codigo, nome_empresa AS nome FROM clientes WHERE id = ?', [clienteId]);
+    if (!cliente) {
+      return res.status(404).json({ message: 'Cliente não encontrado' });
+    }
+
+    const existente = get('SELECT id FROM legalizacao WHERE cliente_id = ?', [clienteId]);
+
+    if (existente) {
+      run(
+        `UPDATE legalizacao SET
+           tipo_cobranca = ?,
+           percentual_cobranca = ?,
+           valor_cobranca = ?,
+           dia_vencimento = ?,
+           observacoes = ?,
+           atualizado_em = datetime('now','localtime')
+         WHERE cliente_id = ?`,
+        [cobranca, percentual, valor, vencimento, observacao, clienteId]
+      );
+    } else {
+      run(
+        `INSERT INTO legalizacao (
+           cliente_id, tipo_cobranca, percentual_cobranca, valor_cobranca, dia_vencimento, observacoes
+         ) VALUES (?, ?, ?, ?, ?, ?)`,
+        [clienteId, cobranca, percentual, valor, vencimento, observacao]
+      );
+    }
+
+    registrarAuditoria(
+      req.usuario?.id || 1,
       'EDITAR',
-      'FINANCEIROS',
-      financeiro.cliente.nome,
-      `Atualizou dados financeiros do cliente ${financeiro.cliente.codigo}`,
+      cliente.nome,
+      `Atualizou dados financeiros do cliente ${cliente.codigo}`,
       req.ip
     );
-    
-    res.json(financeiro);
+
+    const atualizado = get(
+      `SELECT 
+         tipo_cobranca AS cobranca,
+         percentual_cobranca AS percentual,
+         valor_cobranca AS valor,
+         dia_vencimento AS vencimento,
+         observacoes AS observacao
+       FROM legalizacao WHERE cliente_id = ?`,
+      [clienteId]
+    );
+
+    res.json({ ...cliente, financeiro: atualizado });
   } catch (error) {
     console.error('Erro ao atualizar financeiro:', error);
     res.status(500).json({ message: 'Erro ao atualizar financeiro', error: error.message });

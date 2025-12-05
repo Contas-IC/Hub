@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Search, Edit2, DollarSign } from 'lucide-react';
-import ModalFinanceiroCliente from '../../components/Legalizacao/ModalFinanceiroCliente';
+import ModalFinanceiroCliente from './components/ModalFinanceiroCliente';
 import { financeiros, configuracoes } from '../../services/api';
 
 export default function Financeiros() {

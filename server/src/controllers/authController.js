@@ -58,35 +58,44 @@ exports.login = async (req, res) => {
     `, [usuario.id]);
 
     // Gerar token JWT
+    const secret = process.env.JWT_SECRET || 'hub-dev-secret';
     const token = jwt.sign(
       { 
         id: usuario.id,
         email: usuario.email,
         nome: usuario.nome
       },
-      process.env.JWT_SECRET,
+      secret,
       { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
     );
 
     // Registrar login bem-sucedido
     registrarAuditoria(usuario.id, 'LOGIN', 'Login realizado com sucesso', req.ip);
 
+    // Montar lista de permissões simplificada para o frontend
+    const permissoesModulos = permissoes
+      .filter(p => p.pode_visualizar === 1)
+      .map(p => p.modulo);
+
+    if (usuario.cargo && String(usuario.cargo).toLowerCase().includes('admin')) {
+      if (!permissoesModulos.includes('ADMIN')) {
+        permissoesModulos.push('ADMIN');
+      }
+    }
+
     // Retornar dados do usuário (sem senha) e token
     res.json({
-      token,
-      usuario: {
-        id: usuario.id,
-        nome: usuario.nome,
-        email: usuario.email,
-        cargo: usuario.cargo,
-        ativo: usuario.ativo,
-        permissoes: permissoes.reduce((acc, p) => {
-          acc[p.modulo] = {
-            visualizar: p.pode_visualizar === 1,
-            editar: p.pode_editar === 1
-          };
-          return acc;
-        }, {})
+      success: true,
+      data: {
+        token,
+        usuario: {
+          id: usuario.id,
+          nome: usuario.nome,
+          email: usuario.email,
+          cargo: usuario.cargo,
+          ativo: usuario.ativo
+        },
+        permissoes: permissoesModulos
       }
     });
 
@@ -115,21 +124,27 @@ exports.verificarToken = async (req, res) => {
       WHERE usuario_id = ?
     `, [usuario.id]);
 
+    const permissoesModulos = permissoes
+      .filter(p => p.pode_visualizar === 1)
+      .map(p => p.modulo);
+
+    if (usuario.cargo && String(usuario.cargo).toLowerCase().includes('admin')) {
+      if (!permissoesModulos.includes('ADMIN')) {
+        permissoesModulos.push('ADMIN');
+      }
+    }
+
     res.json({
-      valido: true,
-      usuario: {
-        id: usuario.id,
-        nome: usuario.nome,
-        email: usuario.email,
-        cargo: usuario.cargo,
-        ativo: usuario.ativo,
-        permissoes: permissoes.reduce((acc, p) => {
-          acc[p.modulo] = {
-            visualizar: p.pode_visualizar === 1,
-            editar: p.pode_editar === 1
-          };
-          return acc;
-        }, {})
+      success: true,
+      data: {
+        usuario: {
+          id: usuario.id,
+          nome: usuario.nome,
+          email: usuario.email,
+          cargo: usuario.cargo,
+          ativo: usuario.ativo
+        },
+        permissoes: permissoesModulos
       }
     });
 

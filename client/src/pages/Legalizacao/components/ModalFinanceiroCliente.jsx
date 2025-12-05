@@ -23,7 +23,7 @@ export default function ModalFinanceiroCliente({ cliente, onClose, salarioMinimo
     e.preventDefault();
     setLoading(true);
     try {
-      await onSalvar({ ...cliente, financeiro: fData });
+      await onSalvar(cliente.id, fData);
     } finally {
       setLoading(false);
     }

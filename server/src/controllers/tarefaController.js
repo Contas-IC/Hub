@@ -1,33 +1,59 @@
-    const Tarefa = require('../../models/Tarefa');
-const Auditoria = require('../../models/Auditoria');
 
-const registrarAuditoria = async (usuario, acao, modulo, entidade, detalhes, ip) => {
+
+const { query, get, run } = require('../config/database');
+
+function registrarAuditoria(usuarioId, acao, entidade, detalhes, ip) {
   try {
-    await Auditoria.create({ usuario, acao, modulo, entidade, detalhes, ip });
+    run(
+      `INSERT INTO auditoria (usuario_id, acao, modulo, entidade, detalhes, ip)
+       VALUES (?, ?, 'AGENDA', ?, ?, ?)`,
+      [usuarioId, acao, entidade, detalhes, ip]
+    );
   } catch (error) {
     console.error('Erro ao registrar auditoria:', error);
   }
-};
+}
 
-// Listar todas as tarefas
+// Listar todas as tarefas (SQLite)
 exports.listarTarefas = async (req, res) => {
   try {
-    const { status, tipo, dataInicio, dataFim } = req.query;
-    
-    const query = {};
-    
-    if (status) query.status = status;
-    if (tipo) query.tipo = tipo;
-    
-    if (dataInicio || dataFim) {
-      query.data = {};
-      if (dataInicio) query.data.$gte = new Date(dataInicio);
-      if (dataFim) query.data.$lte = new Date(dataFim);
+    const { status, dataInicio, dataFim } = req.query;
+
+    let sql = `
+      SELECT 
+        t.id,
+        t.titulo,
+        t.descricao,
+        t.status,
+        t.prioridade,
+        t.data_vencimento,
+        c.nome_empresa AS cliente_nome
+      FROM tarefas t
+      LEFT JOIN clientes c ON c.id = t.cliente_id
+      WHERE 1=1
+    `;
+
+    const params = [];
+
+    if (status && status !== 'TODAS') {
+      sql += ' AND t.status = ?';
+      params.push(status);
     }
-    
-    const tarefas = await Tarefa.find(query)
-      .sort({ data: 1, hora: 1 });
-    
+
+    if (dataInicio && dataFim) {
+      sql += " AND date(t.data_vencimento) BETWEEN date(?) AND date(?)";
+      params.push(dataInicio, dataFim);
+    } else if (dataInicio) {
+      sql += " AND date(t.data_vencimento) >= date(?)";
+      params.push(dataInicio);
+    } else if (dataFim) {
+      sql += " AND date(t.data_vencimento) <= date(?)";
+      params.push(dataFim);
+    }
+
+    sql += ' ORDER BY datetime(t.data_vencimento) ASC';
+
+    const tarefas = query(sql, params);
     res.json(tarefas);
   } catch (error) {
     console.error('Erro ao listar tarefas:', error);
@@ -35,16 +61,24 @@ exports.listarTarefas = async (req, res) => {
   }
 };
 
-// Buscar tarefa por ID
+// Buscar tarefa por ID (SQLite)
 exports.buscarTarefaPorId = async (req, res) => {
   try {
     const { id } = req.params;
-    const tarefa = await Tarefa.findById(id);
-    
+    const tarefa = get(
+      `SELECT 
+         t.*, 
+         c.nome_empresa AS cliente_nome
+       FROM tarefas t
+       LEFT JOIN clientes c ON c.id = t.cliente_id
+       WHERE t.id = ?`,
+      [id]
+    );
+
     if (!tarefa) {
       return res.status(404).json({ message: 'Tarefa não encontrada' });
     }
-    
+
     res.json(tarefa);
   } catch (error) {
     console.error('Erro ao buscar tarefa:', error);
@@ -52,26 +86,48 @@ exports.buscarTarefaPorId = async (req, res) => {
   }
 };
 
-// Criar nova tarefa
+// Criar nova tarefa (SQLite)
 exports.criarTarefa = async (req, res) => {
   try {
-    const dadosTarefa = {
-      ...req.body,
-      criadoPor: req.usuario.id
-    };
-    
-    const novaTarefa = await Tarefa.create(dadosTarefa);
-    
-    // Registrar auditoria
-    await registrarAuditoria(
-      req.usuario.id,
+    const {
+      titulo,
+      descricao,
+      cliente_id,
+      usuario_responsavel_id,
+      prioridade,
+      status,
+      data_vencimento
+    } = req.body;
+
+    if (!titulo) {
+      return res.status(400).json({ message: 'Título é obrigatório' });
+    }
+
+    const result = run(
+      `INSERT INTO tarefas (
+         titulo, descricao, cliente_id, usuario_responsavel_id, prioridade, status, data_vencimento
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [
+        titulo,
+        descricao || '',
+        cliente_id || null,
+        usuario_responsavel_id || null,
+        prioridade || 'MEDIA',
+        status || 'PENDENTE',
+        data_vencimento || null
+      ]
+    );
+
+    const novaTarefa = get('SELECT * FROM tarefas WHERE id = ?', [result.lastInsertRowid]);
+
+    registrarAuditoria(
+      req.usuario?.id || 1,
       'CRIAR',
-      'AGENDA',
       novaTarefa.titulo,
       `Criou nova tarefa: ${novaTarefa.titulo}`,
       req.ip
     );
-    
+
     res.status(201).json(novaTarefa);
   } catch (error) {
     console.error('Erro ao criar tarefa:', error);
@@ -79,35 +135,57 @@ exports.criarTarefa = async (req, res) => {
   }
 };
 
-// Atualizar tarefa
+// Atualizar tarefa (SQLite)
 exports.atualizarTarefa = async (req, res) => {
   try {
     const { id } = req.params;
-    const dadosAtualizacao = {
-      ...req.body,
-      atualizadoPor: req.usuario.id
-    };
-    
-    const tarefaAtualizada = await Tarefa.findByIdAndUpdate(
-      id,
-      dadosAtualizacao,
-      { new: true, runValidators: true }
-    );
-    
-    if (!tarefaAtualizada) {
+    const {
+      titulo,
+      descricao,
+      cliente_id,
+      usuario_responsavel_id,
+      prioridade,
+      status,
+      data_vencimento
+    } = req.body;
+
+    const existente = get('SELECT * FROM tarefas WHERE id = ?', [id]);
+    if (!existente) {
       return res.status(404).json({ message: 'Tarefa não encontrada' });
     }
-    
-    // Registrar auditoria
-    await registrarAuditoria(
-      req.usuario.id,
+
+    run(
+      `UPDATE tarefas SET 
+         titulo = COALESCE(?, titulo),
+       descricao = COALESCE(?, descricao),
+       cliente_id = COALESCE(?, cliente_id),
+       usuario_responsavel_id = COALESCE(?, usuario_responsavel_id),
+       prioridade = COALESCE(?, prioridade),
+       status = COALESCE(?, status),
+       data_vencimento = COALESCE(?, data_vencimento)
+       WHERE id = ?`,
+      [
+        titulo,
+        descricao,
+        cliente_id,
+        usuario_responsavel_id,
+        prioridade,
+        status,
+        data_vencimento,
+        id
+      ]
+    );
+
+    const tarefaAtualizada = get('SELECT * FROM tarefas WHERE id = ?', [id]);
+
+    registrarAuditoria(
+      req.usuario?.id || 1,
       'EDITAR',
-      'AGENDA',
       tarefaAtualizada.titulo,
       `Atualizou tarefa: ${tarefaAtualizada.titulo}`,
       req.ip
     );
-    
+
     res.json(tarefaAtualizada);
   } catch (error) {
     console.error('Erro ao atualizar tarefa:', error);
@@ -115,27 +193,26 @@ exports.atualizarTarefa = async (req, res) => {
   }
 };
 
-// Excluir tarefa
+// Excluir tarefa (SQLite)
 exports.excluirTarefa = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    const tarefa = await Tarefa.findByIdAndDelete(id);
-    
+
+    const tarefa = get('SELECT * FROM tarefas WHERE id = ?', [id]);
     if (!tarefa) {
       return res.status(404).json({ message: 'Tarefa não encontrada' });
     }
-    
-    // Registrar auditoria
-    await registrarAuditoria(
-      req.usuario.id,
+
+    run('DELETE FROM tarefas WHERE id = ?', [id]);
+
+    registrarAuditoria(
+      req.usuario?.id || 1,
       'EXCLUIR',
-      'AGENDA',
       tarefa.titulo,
       `Excluiu tarefa: ${tarefa.titulo}`,
       req.ip
     );
-    
+
     res.json({ message: 'Tarefa excluída com sucesso' });
   } catch (error) {
     console.error('Erro ao excluir tarefa:', error);
@@ -143,18 +220,22 @@ exports.excluirTarefa = async (req, res) => {
   }
 };
 
-// Estatísticas de tarefas
+// Estatísticas de tarefas (SQLite)
 exports.estatisticasTarefas = async (req, res) => {
   try {
-    const pendentes = await Tarefa.countDocuments({ status: 'PENDENTE' });
-    const concluidas = await Tarefa.countDocuments({ status: 'CONCLUIDO' });
-    const atrasadas = await Tarefa.countDocuments({ status: 'ATRASADO' });
-    
+    const pendentes = get("SELECT COUNT(*) AS count FROM tarefas WHERE status = 'PENDENTE'").count;
+    const emAndamento = get("SELECT COUNT(*) AS count FROM tarefas WHERE status = 'EM_ANDAMENTO'").count;
+    const concluidas = get("SELECT COUNT(*) AS count FROM tarefas WHERE status = 'CONCLUIDA'").count;
+    const atrasadas = get(
+      "SELECT COUNT(*) AS count FROM tarefas WHERE status != 'CONCLUIDA' AND date(data_vencimento) < date('now')"
+    ).count;
+
     res.json({
       pendentes,
+      emAndamento,
       concluidas,
       atrasadas,
-      total: pendentes + concluidas + atrasadas
+      total: pendentes + emAndamento + concluidas
     });
   } catch (error) {
     console.error('Erro ao buscar estatísticas:', error);
